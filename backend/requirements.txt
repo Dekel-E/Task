@@ -1,0 +1,11 @@
+fastapi~=0.116.1
+uvicorn[standard]~=0.35.0
+pydantic~=2.11.7
+python-dotenv~=1.1.0
+# Supabase JWT verification (HS256 secret + ES256/JWKS). `crypto` extra pulls in
+# `cryptography` for the asymmetric path.
+pyjwt[crypto]~=2.10.1
+# Direct Postgres access for the shared-terminal membership check.
+asyncpg~=0.30.0
+# ConPTY-backed shell for the shared terminal (Windows).
+pywinpty~=2.0.14
