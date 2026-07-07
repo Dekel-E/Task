@@ -2,9 +2,18 @@
 
 Each terminal id maps to ONE real PowerShell (ConPTY via pywinpty). Multiple
 authorized clients attach to the same session: a single background pump reads
-the PTY and broadcasts output to every attached socket, and input/resize from
-any socket is written to the shared PTY. The PTY is torn down when the last
-viewer disconnects.
+the PTY and broadcasts output to every attached socket, and input from any
+socket is written to the shared PTY. The PTY is torn down when the last viewer
+disconnects.
+
+The grid is a FIXED size (see FIXED_ROWS/FIXED_COLS). A pty has a single
+(rows, cols) that the shell uses to wrap lines and place the cursor; letting
+each viewer push its own window size meant the last one to connect clobbered
+that size, so the shell would reflow the other viewers' prompts at a width that
+didn't match their windows (the "weird indentation"). Pinning the size removes
+the moving part entirely: every viewer renders the identical grid and resize
+messages are ignored. The frontend renders this fixed grid (centered/scrolled),
+so it must NOT fit-to-window.
 
 Dev-only: this runs real shell commands on the host with no sandbox. Acceptable
 because the app is a local-only demo, and joins are authorized (owner or invited
@@ -20,6 +29,11 @@ from winpty import PtyProcess
 from auth import decode_token
 from db import can_access_terminal
 
+# The one true size for every shared terminal. Kept in sync with the frontend's
+# xterm grid (terminal-view.tsx). pywinpty takes dimensions as (rows, cols).
+FIXED_ROWS = 30
+FIXED_COLS = 100
+
 
 class Session:
     """One shared PTY plus the set of sockets currently attached to it."""
@@ -31,7 +45,9 @@ class Session:
         self.pump_task: asyncio.Task | None = None
 
     def start(self) -> None:
-        self.proc = PtyProcess.spawn(["powershell.exe", "-NoLogo"], dimensions=(24, 80))
+        self.proc = PtyProcess.spawn(
+            ["powershell.exe", "-NoLogo"], dimensions=(FIXED_ROWS, FIXED_COLS)
+        )
         self.pump_task = asyncio.create_task(self._pump())
 
     async def _pump(self) -> None:
@@ -110,13 +126,9 @@ async def terminal_session(ws: WebSocket, terminal_id: str, token: str) -> None:
             kind = msg.get("type")
             if kind == "input":
                 session.proc.write(msg.get("data", ""))
-            elif kind == "resize":
-                try:
-                    session.proc.setwinsize(
-                        int(msg.get("rows", 24)), int(msg.get("cols", 80))
-                    )
-                except (ValueError, OSError):
-                    pass
+            # "resize" is intentionally ignored: the grid is fixed (see module
+            # docstring). Honoring per-client resizes is what caused viewers to
+            # clobber each other's rendering.
     except WebSocketDisconnect:
         pass
     finally:
